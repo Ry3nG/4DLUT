@@ -15,7 +15,7 @@ from torchvision import datasets
 from torch.autograd import Variable
 
 from models_x import *
-from datasetsMIT import *
+from datasets import *
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -55,7 +55,7 @@ LUT_enhancement = Generator4DLUT_identity()
 Generator_bias = Generator_for_bias()
 Generator_context = Generator_for_info()
 TV4 = TV_4D()
-quadrilinear_enhancement_ = QuadrilinearInterpolation_4D() 
+quadrilinear_enhancement_ = QuadrilinearInterpolation_4D()
 
 if cuda:
     LUT_enhancement = LUT_enhancement.cuda()
@@ -82,14 +82,14 @@ optimizer_G = torch.optim.Adam(itertools.chain(Generator_bias.parameters(), Gene
 
 if opt.input_color_space == 'sRGB':
     dataloader = DataLoader(
-        ImageDataset_sRGB("/fivek_dataset/MIT-Adobe5k-UPE/" , mode = "train"),
+        ImageDataset_sRGB("/mnt/slurm_home/zrgong/4DLUT/fivek_dataset/MIT-Adobe5k-UPE" , mode = "train"),
         batch_size=opt.batch_size,
         shuffle=True,
         num_workers=1,
     )
 
     psnr_dataloader = DataLoader(
-        ImageDataset_sRGB("/fivek_dataset/MIT-Adobe5k-UPE/" ,  mode="test"),
+        ImageDataset_sRGB("/mnt/slurm_home/zrgong/4DLUT/fivek_dataset/MIT-Adobe5k-UPE" ,  mode="test"),
         batch_size=1,
         shuffle=False,
         num_workers=1,
@@ -127,18 +127,20 @@ def generator_eval(img):
     context = context.new(context.size())
     context = Variable(context.fill_(0).type(Tensor))
 
-    pred = pred.squeeze(2).squeeze(2).squeeze(0)   
+    pred = pred.squeeze(2).squeeze(2).squeeze(0)
 
     combine = torch.cat([context,img],1)
-    
+
     new_LUT_enhancement = LUT_enhancement.LUT_en.new(LUT_enhancement.LUT_en.size())
     new_LUT_enhancement[0] = pred[0] * LUT_enhancement.LUT_en[0] + pred[1] * LUT_enhancement.LUT_en[1] + pred[2] * LUT_enhancement.LUT_en[2] + pred[9]
     new_LUT_enhancement[1] = pred[3] * LUT_enhancement.LUT_en[0] + pred[4] * LUT_enhancement.LUT_en[1] + pred[5] * LUT_enhancement.LUT_en[2] + pred[10]
     new_LUT_enhancement[2] = pred[6] * LUT_enhancement.LUT_en[0] + pred[7] * LUT_enhancement.LUT_en[1] + pred[8] * LUT_enhancement.LUT_en[2] + pred[11]
-    
+
     weights_norm = torch.mean(pred[0] ** 2)
     combine_A = img.new(img.size())
     _, combine_A = quadrilinear_enhancement_(new_LUT_enhancement,combine)
+
+    #print(f"Shape of combine_A in generator_eval: {combine_A.shape}")
 
     return combine_A, weights_norm
 
@@ -151,6 +153,9 @@ def calculate_psnr():
         real_B = Variable(batch["A_exptC"].type(Tensor))
         fake_B, _ = generator_eval(real_A)
         fake_B = torch.clamp(fake_B,0.0,1.0)
+        # Resize fake_B to match real_B
+        # fake_B = F.interpolate(fake_B, size=real_B.shape[2:], mode='bilinear', align_corners=False)
+
         fake_B = torch.round(fake_B*255)
         real_B = torch.round(real_B*255)
         mse = criterion_pixelwise(fake_B, real_B)
@@ -162,20 +167,47 @@ def calculate_ssim():
     Generator_bias.eval()
     Generator_context.eval()
     avg_ssim = 0
+    count = 0
     for i, batch in enumerate(psnr_dataloader):
         real_A = Variable(batch["A_input"].type(Tensor))
         real_B = Variable(batch["A_exptC"].type(Tensor))
         fake_B, _ = generator_eval(real_A)
         fake_B = torch.clamp(fake_B,0.0,1.0)
+
+        # Resize fake_B to match real_B
+        # fake_B = F.interpolate(fake_B, size=real_B.shape[2:], mode='bilinear', align_corners=False)
+
+        # Print shapes before numpy conversion
+        #print(f"Shape of real_B: {real_B.shape}")
+        #print(f"Shape of fake_B: {fake_B.shape}")
+
         fake_B = fake_B.squeeze(0).cpu().detach().numpy()
         real_B = real_B.squeeze(0).cpu().detach().numpy()
-        fake_B = np.swapaxes(np.swapaxes(fake_B, 0, 2), 0, 1)
-        real_B = np.swapaxes(np.swapaxes(real_B, 0, 2), 0, 1)
+
+        # Print shapes after numpy conversion
+        #print(f"Shape of real_B after squeeze: {real_B.shape}")
+        #print(f"Shape of fake_B after squeeze: {fake_B.shape}")
+
+        #fake_B = np.swapaxes(np.swapaxes(fake_B, 0, 2), 0, 1)
+        #real_B = np.swapaxes(np.swapaxes(real_B, 0, 2), 0, 1)
+
+        fake_B = np.transpose(fake_B, (1, 2, 0))
+        real_B = np.transpose(real_B, (1, 2, 0))
+
+        # Print shapes after transpose
+        #print(f"Shape of real_B after transpose: {real_B.shape}")
+        #print(f"Shape of fake_B after transpose: {fake_B.shape}")
+
         fake_B = fake_B.astype(np.float32)
         real_B = real_B.astype(np.float32)
-        ssim_val = ssim(real_B,fake_B, data_range=real_B.max() - fake_B.min(), multichannel=True, gaussian_weights=True, win_size=11)
-        avg_ssim += ssim_val
-    return avg_ssim / len(psnr_dataloader)
+        try:
+            ssim_val = ssim(real_B,fake_B, data_range=real_B.max() - fake_B.min(), multichannel=True, gaussian_weights=True, win_size=3, channel_axis=-1) #changed from 11 to 7
+            avg_ssim += ssim_val
+            count += 1
+        except Exception as e:
+            print(f"Error calculating SSIM: {e}")
+            print(f"real_B shape: {real_B.shape}, fake_B shape: {fake_B.shape}")
+    return avg_ssim / count if count > 0 else 0
 
 
 
@@ -190,6 +222,13 @@ def visualize_result(epoch):
         img_name = batch["input_name"]
         fake_B, _ = generator_eval(real_A)
         fake_B = torch.clamp(fake_B,0.0,1.0)
+
+        # Resize fake_B to match real_B
+        #fake_B = F.interpolate(fake_B, size=real_B.shape[2:], mode='bilinear', align_corners=False)
+
+        # Ensure real_A has the same shape as real_B and fake_B
+        #real_A = F.interpolate(real_A, size=real_B.shape[2:], mode='bilinear', align_corners=False)
+
         img_sample = torch.cat((real_A.data, fake_B.data, real_B.data), -1)
         fake_B = torch.round(fake_B*255)
         real_B = torch.round(real_B*255)
@@ -212,7 +251,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # Model inputs
         real_A = Variable(batch["A_input"].type(Tensor))
         real_B = Variable(batch["A_exptC"].type(Tensor))
-        # ------------------ 
+        # ------------------
         #  Train Generators
         # ------------------
 
@@ -281,4 +320,3 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     if (epoch+1) % 100 == 0:
        visualize_result(epoch+1)
-

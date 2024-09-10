@@ -1,5 +1,19 @@
 # ignore data folder
 data/
+fivek_dataset/
+
+# ignore dataset tar files
+*.tar
 
 # ignore vscode settings
 .vscode/
+
+# ignore training outputs
+images/
+saved_models/
+
+# ignore pytorch checkpoints
+*.pth
+
+# ignore pycache
+__pycache__/

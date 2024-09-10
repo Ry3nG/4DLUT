@@ -16,21 +16,23 @@ class ImageDataset_sRGB(Dataset):
         self.mode = mode
         self.unpaird_data = unpaird_data
 
-        file = open(os.path.join(root,'images_train.txt'),'r') #for DPE
-        set1_input_files = sorted(file.readlines())
-        self.set1_input_files = list()
-        self.set1_expert_files = list()
-        for i in range(len(set1_input_files)):
-            self.set1_input_files.append(os.path.join(root,"input","InputAsShotZero",set1_input_files[i][:-1] + ".png"))
-            self.set1_expert_files.append(os.path.join(root,"output","Export_C_512",set1_input_files[i][:-1] + ".png"))
+        file = open("/mnt/slurm_home/zrgong/4DLUT/fivek_dataset/MIT-Adobe5k-UPE/images_train.txt",'r') #for DPE
+        set1_input_files = file.read().splitlines()
+        file.close()
+        self.set1_input_files = []
+        self.set1_expert_files = []
+        for filename in set1_input_files:
+            self.set1_input_files.append(os.path.join(root,"input","InputAsShotZero_resized510x510",filename + ".png"))
+            self.set1_expert_files.append(os.path.join(root,"output","Export_C_512_resized510x510",filename + ".png"))
 
-        file = open(os.path.join(root,'images_test.txt'),'r')
-        test_input_files = sorted(file.readlines())
-        self.test_input_files = list()
-        self.test_expert_files = list()
-        for i in range(len(test_input_files)):
-            self.test_input_files.append(os.path.join(root,"input","InputAsShotZero",test_input_files[i][:-1] + ".png"))
-            self.test_expert_files.append(os.path.join(root,"output","Export_C_512",test_input_files[i][:-1] + ".png"))
+        file = open("/mnt/slurm_home/zrgong/4DLUT/fivek_dataset/MIT-Adobe5k-UPE/images_test.txt",'r')
+        test_input_files = file.read().splitlines()
+        file.close()
+        self.test_input_files = []
+        self.test_expert_files = []
+        for filename in test_input_files:
+            self.test_input_files.append(os.path.join(root,"input","InputAsShotZero_resized510x510",filename + ".png"))
+            self.test_expert_files.append(os.path.join(root,"output","Export_C_512_resized510x510",filename + ".png"))
 
     def __getitem__(self, index):
         if self.mode == "train":
